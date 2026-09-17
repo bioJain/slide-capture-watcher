@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +24,16 @@ class PngToPdfTests(unittest.TestCase):
 
             self.assertEqual(names, ["slide_1.png", "slide_2.PNG", "slide_10.png"])
 
+    def test_find_images_supports_common_formats_in_numeric_order(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = Path(temp_dir)
+            for name in ("page_12.jpg", "page_2.webp", "page_1.PNG", "notes.txt"):
+                (directory / name).touch()
+
+            names = [path.name for path in png_to_pdf.find_images(directory)]
+
+            self.assertEqual(names, ["page_1.PNG", "page_2.webp", "page_12.jpg"])
+
     def test_create_pdf_writes_one_page_per_image(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             directory = Path(temp_dir)
@@ -39,12 +50,16 @@ class PngToPdfTests(unittest.TestCase):
             count = png_to_pdf.create_pdf(paths, output)
 
             self.assertEqual(count, 2)
-            with Image.open(output) as pdf:
-                self.assertEqual(pdf.n_frames, 2)
+            pdf_data = output.read_bytes()
+            self.assertTrue(pdf_data.startswith(b"%PDF"))
+            self.assertEqual(len(re.findall(rb"/Type\s*/Page\b", pdf_data)), 2)
 
     def test_main_rejects_directory_without_pngs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.assertEqual(png_to_pdf.main([temp_dir]), 1)
+
+    def test_main_requires_a_directory_outside_gui_mode(self):
+        self.assertEqual(png_to_pdf.main([]), 2)
 
 
 if __name__ == "__main__":
