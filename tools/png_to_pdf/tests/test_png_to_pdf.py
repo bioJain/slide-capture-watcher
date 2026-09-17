@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,8 +50,9 @@ class PngToPdfTests(unittest.TestCase):
             count = png_to_pdf.create_pdf(paths, output)
 
             self.assertEqual(count, 2)
-            with Image.open(output) as pdf:
-                self.assertEqual(pdf.n_frames, 2)
+            pdf_data = output.read_bytes()
+            self.assertTrue(pdf_data.startswith(b"%PDF"))
+            self.assertEqual(len(re.findall(rb"/Type\s*/Page\b", pdf_data)), 2)
 
     def test_main_rejects_directory_without_pngs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
