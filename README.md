@@ -11,6 +11,23 @@ Windows에서 특정 창을 계속 감시하다가 슬라이드 전환이 끝난
 python -m pip install -r requirements.txt
 ```
 
+SSIM 계산은 OpenCV만으로 구현되어 있어 `scikit-image`는 더 이상 필요하지 않습니다.
+
+## 구성
+
+| 파일 | 역할 |
+| --- | --- |
+| `capture_core.py` | 창 탐색, 캡처, 변화 감지, 감시 루프. GUI와 CLI가 공통으로 import하는 core 모듈 |
+| `slide_capture_watcher.py` | 명령행 wrapper. 인자를 `Config`/`WatchOptions`로 바꾸고 core 이벤트를 콘솔에 출력 |
+| `tests/` | core와 CLI 단위 테스트 (`python -m pytest tests`) |
+| `tools/png_to_pdf/` | 독립 PNG→PDF 변환 도구 |
+
+core는 콘솔 출력이나 `sys.exit`를 하지 않습니다. `SlideWatcher(options, config, on_event)`에
+콜백을 넘기면 `LogEvent`, `CaptureEvent`, `CandidateEvent`, `MetricsEvent`, `StoppedEvent`를
+받게 되고, `watcher.stop()`과 `watcher.request_capture()`로 다른 스레드에서 감시를 멈추거나
+수동 캡처를 요청할 수 있습니다. `capture_core`를 import하는 시점에 프로세스가 DPI-aware로
+선언되므로 다른 win32 호출보다 먼저 import해야 합니다.
+
 ## 시작하기
 
 ```powershell
