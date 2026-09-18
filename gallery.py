@@ -131,8 +131,13 @@ class ThumbnailGallery:
         self._grid_window = self.canvas.create_window((0, 0), window=self.grid, anchor="nw")
         self.grid.bind("<Configure>", lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", self._on_canvas_resize)
-        self.canvas.bind("<Enter>", lambda _e: self._bind_wheel(True))
-        self.canvas.bind("<Leave>", lambda _e: self._bind_wheel(False))
+        # 휠 바인딩은 전역으로 한 번만 걸고, 이벤트 시점에 포인터가 이 캔버스(또는 그 안의 썸네일/체크박스)
+        # 위에 있는지 확인한다. 캔버스 <Enter>/<Leave>로 켜고 끄면 자식 위젯에 들어가는 순간 <Leave>가
+        # 와서 썸네일 위에서는 스크롤이 안 된다.
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.canvas.bind_all("<Button-4>", lambda e: self._wheel_scroll(e, -1), add="+")
+        self.canvas.bind_all("<Button-5>", lambda e: self._wheel_scroll(e, 1), add="+")
+        self._configured_columns = 0
 
         # -- 상세 패널
         detail = ttk.LabelFrame(self.frame, text="선택한 캡처", padding=6)
@@ -311,21 +316,38 @@ class ThumbnailGallery:
             self._relayout()
 
     def _relayout(self) -> None:
-        for column in range(max(self._columns, 1)):
+        columns = max(self._columns, 1)
+        # 넓었다가 좁아지면 더 이상 쓰지 않는 열의 weight를 0으로 되돌린다. 남겨두면 빈 열이 폭을 차지해
+        # 썸네일이 왼쪽으로 몰린다.
+        for column in range(columns, self._configured_columns):
+            self.grid.columnconfigure(column, weight=0)
+        for column in range(columns):
             self.grid.columnconfigure(column, weight=1)
+        self._configured_columns = max(columns, self._configured_columns)
         for index, path in enumerate(self._order):
             item = self._items[path]
             item.frame.grid(row=index // self._columns, column=index % self._columns, padx=CELL_PAD, pady=CELL_PAD, sticky="n")
 
-    def _bind_wheel(self, enable: bool) -> None:
-        if enable:
-            self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-            self.canvas.bind_all("<Button-4>", lambda _e: self.canvas.yview_scroll(-1, "units"))
-            self.canvas.bind_all("<Button-5>", lambda _e: self.canvas.yview_scroll(1, "units"))
-        else:
-            self.canvas.unbind_all("<MouseWheel>")
-            self.canvas.unbind_all("<Button-4>")
-            self.canvas.unbind_all("<Button-5>")
+    def _widget_in_gallery_canvas(self, widget) -> bool:
+        """위젯이 이 갤러리 캔버스이거나 그 안에 embed된 그리드의 자손인지."""
+        if widget is None:
+            return False
+        canvas_path = str(self.canvas)
+        widget_path = str(widget)
+        return widget_path == canvas_path or widget_path.startswith(canvas_path + ".")
+
+    def _pointer_over_canvas(self, event) -> bool:
+        try:
+            widget = self.canvas.winfo_containing(event.x_root, event.y_root)
+        except Exception:  # 창이 이미 닫힌 경우 등
+            return False
+        return self._widget_in_gallery_canvas(widget)
+
+    def _wheel_scroll(self, event, units: int) -> None:
+        if self._pointer_over_canvas(event):
+            self.canvas.yview_scroll(units, "units")
 
     def _on_mousewheel(self, event) -> None:
-        self.canvas.yview_scroll(int(-event.delta / 120), "units")
+        if not event.delta:
+            return
+        self._wheel_scroll(event, int(-event.delta / 120) or (-1 if event.delta > 0 else 1))

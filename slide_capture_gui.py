@@ -484,7 +484,13 @@ class WatcherApp:
 
         if not calibrate:
             # 저장 폴더에 이미 있는 캡처(이전 세션 등)를 갤러리에 먼저 보여준다.
-            existing = self.gallery.load_folder(options.outdir)
+            # 폴더 목록을 읽을 수 없으면(ACL 등) 워커를 시작하지 않고 오류로 알린다.
+            try:
+                existing = self.gallery.load_folder(options.outdir)
+            except OSError as exc:
+                self.watcher = None
+                self._show_error("저장 폴더", f"폴더를 읽을 수 없습니다: {options.outdir}\n{exc}")
+                return
             if existing:
                 self.log(f"저장 폴더의 기존 이미지 {existing}개를 갤러리에 불러왔습니다.")
 

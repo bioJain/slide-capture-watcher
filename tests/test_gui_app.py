@@ -199,3 +199,25 @@ def test_existing_images_are_loaded_on_start(app, core, root, monkeypatch, tmp_p
     assert len(app.gallery.paths()) == 2
     app.stop()
     assert pump(root, lambda: not app.is_running)
+
+
+def test_unreadable_output_folder_is_reported_and_watcher_not_started(app, core, monkeypatch, tmp_path):
+    import gallery as gallery_module
+    from tkinter import messagebox
+
+    shown = []
+    monkeypatch.setattr(messagebox, "showerror", lambda title, message, **kw: shown.append((title, message)))
+
+    def denied(directory):
+        raise PermissionError(13, "Access is denied", str(directory))
+
+    monkeypatch.setattr(gallery_module, "find_images", denied)
+    monkeypatch.setattr(core, "capture_window_printwindow", FakeCapture([solid(0)]))
+
+    app.start()
+
+    assert not app.is_running
+    assert app.watcher is None
+    assert shown and shown[0][0] == "저장 폴더"
+    assert "폴더를 읽을 수 없습니다" in log_text(app)
+    assert str(app.btn_start["state"]) == "normal"

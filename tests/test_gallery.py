@@ -144,3 +144,52 @@ def test_relayout_on_resize_changes_columns(gallery, folder, root):
     assert gallery._columns == 1 < wide_columns
     rows = {item.frame.grid_info()["row"] for item in gallery._items.values()}
     assert rows == {0, 1, 2}
+
+
+def test_relayout_resets_weights_of_unused_columns(gallery, folder):
+    gallery.load_folder(folder)
+
+    class Event:
+        width = 1000
+
+    gallery._on_canvas_resize(Event())
+    wide = gallery._columns
+    assert wide > 1
+    assert gallery.grid.columnconfigure(wide - 1, "weight") == 1
+
+    Event.width = 200
+    gallery._on_canvas_resize(Event())
+    assert gallery._columns == 1
+    for column in range(1, wide):
+        assert gallery.grid.columnconfigure(column, "weight") == 0
+    assert gallery.grid.columnconfigure(0, "weight") == 1
+
+
+def test_wheel_applies_over_canvas_children_only(gallery, folder):
+    gallery.load_folder(folder)
+    item = next(iter(gallery._items.values()))
+    assert gallery._widget_in_gallery_canvas(gallery.canvas)
+    assert gallery._widget_in_gallery_canvas(gallery.grid)
+    assert gallery._widget_in_gallery_canvas(item.check)
+    assert not gallery._widget_in_gallery_canvas(gallery.text_comment)
+    assert not gallery._widget_in_gallery_canvas(gallery.btn_select_all)
+    assert not gallery._widget_in_gallery_canvas(None)
+
+
+def test_wheel_scrolls_only_when_pointer_is_over_canvas(gallery, folder, monkeypatch):
+    gallery.load_folder(folder)
+    scrolled = []
+    monkeypatch.setattr(gallery.canvas, "yview_scroll", lambda units, what: scrolled.append(units))
+
+    class Event:
+        delta = -120
+        x_root = 0
+        y_root = 0
+
+    monkeypatch.setattr(gallery.canvas, "winfo_containing", lambda x, y: gallery.text_comment)
+    gallery._on_mousewheel(Event())
+    assert scrolled == []
+
+    monkeypatch.setattr(gallery.canvas, "winfo_containing", lambda x, y: gallery.grid)
+    gallery._on_mousewheel(Event())
+    assert scrolled == [1]
