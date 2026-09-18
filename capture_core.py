@@ -323,6 +323,7 @@ class WatchOptions:
     interval: float = 1.0
     max_missing: int = 5
     debug_diff: bool = False
+    hwnd: Optional[int] = None  # 지정하면 이 창을 우선 사용(GUI 드롭다운 선택). 재탐색은 title로.
 
     def __post_init__(self) -> None:
         self.outdir = Path(self.outdir)
@@ -558,6 +559,10 @@ class SlideWatcher:
         return self.stop_event.wait(seconds)
 
     def _locate_window(self) -> None:
+        if self.options.hwnd is not None and win32gui.IsWindow(self.options.hwnd):
+            self.hwnd = self.options.hwnd
+            self.window_title = win32gui.GetWindowText(self.hwnd) or self.options.title
+            return
         matches = find_windows_by_title(self.options.title)
         if not matches:
             raise WindowNotFoundError(

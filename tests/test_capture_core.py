@@ -343,3 +343,33 @@ def test_calibrate_emits_metrics_and_writes_csv(core, monkeypatch, win32gui_stub
     assert lines[0].startswith("timestamp,ssim,bbox_ratio")
     assert len(lines) == 3
     assert not list((tmp_path).glob("slide_*.png"))  # calibrate는 저장하지 않는다
+
+
+def test_explicit_hwnd_is_preferred_over_title_search(core, monkeypatch, win32gui_stub, tmp_path):
+    fake = FakeCapture([solid(0)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: pytest.fail("title search should not run"))
+    monkeypatch.setattr(win32gui_stub, "GetWindowText", lambda hwnd: f"Exact {hwnd}")
+
+    options = core.WatchOptions(title="fake", outdir=tmp_path, interval=0.0, hwnd=7)
+    watcher = core.SlideWatcher(options, _fast_config(core))
+    watcher._on_event = lambda e: watcher.stop() if isinstance(e, core.CaptureEvent) else None
+    watcher.run()
+
+    assert watcher.hwnd == 7
+    assert watcher.window_title == "Exact 7"
+
+
+def test_stale_hwnd_falls_back_to_title_search(core, monkeypatch, win32gui_stub, tmp_path):
+    fake = FakeCapture([solid(0)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(3, "Found by title")])
+    monkeypatch.setattr(win32gui_stub, "IsWindow", lambda hwnd: hwnd != 7)
+
+    options = core.WatchOptions(title="fake", outdir=tmp_path, interval=0.0, hwnd=7)
+    watcher = core.SlideWatcher(options, _fast_config(core))
+    watcher._on_event = lambda e: watcher.stop() if isinstance(e, core.CaptureEvent) else None
+    watcher.run()
+
+    assert watcher.hwnd == 3
+    assert watcher.window_title == "Found by title"
