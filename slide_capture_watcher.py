@@ -191,10 +191,16 @@ def build_arg_parser():
 # 실행
 # ---------------------------------------------------------------------------
 
-def _run_in_thread(target, *args) -> Optional[BaseException]:
+STOP_JOIN_TIMEOUT = 10.0  # Ctrl+C 후 워커가 저장/CSV 정리를 마칠 때까지 기다리는 최대 시간(초)
+
+
+def _run_in_thread(target, stop_fn, *args) -> Optional[BaseException]:
     """
     감시 루프를 백그라운드 스레드에서 돌리고 메인 스레드는 Ctrl+C만 기다린다.
     GUI가 쓰게 될 것과 같은 stop-event 패턴을 CLI에서도 그대로 사용한다.
+
+    Ctrl+C가 오면 ``stop_fn()`` 으로 워커에 중지를 알린 뒤 워커가 끝날 때까지 join한다.
+    진행 중인 이미지 저장이나 CSV 닫기가 끝나기 전에 프로세스가 종료되지 않게 하기 위함이다.
     """
     error: dict = {}
 
@@ -206,20 +212,30 @@ def _run_in_thread(target, *args) -> Optional[BaseException]:
 
     thread = threading.Thread(target=_worker, name="slide-watcher", daemon=True)
     thread.start()
+    interrupted = False
     try:
         while thread.is_alive():
             thread.join(timeout=0.2)
     except KeyboardInterrupt:
+        interrupted = True
         log("사용자에 의해 중단되었습니다. 정리 중...")
+        stop_fn()
+        try:
+            thread.join(timeout=STOP_JOIN_TIMEOUT)
+        except KeyboardInterrupt:
+            log("한 번 더 중단 요청을 받아 정리를 기다리지 않고 종료합니다.")
+        if thread.is_alive():
+            log("워커 스레드가 제때 끝나지 않았습니다. 마지막 캡처가 불완전할 수 있습니다.")
+    if interrupted:
         return KeyboardInterrupt()
     return error.get("exc")
 
 
 def run(args) -> int:
     watcher = SlideWatcher(build_watch_options(args), build_config(args), on_event=print_event)
-    error = _run_in_thread(watcher.run)
+    error = _run_in_thread(watcher.run, watcher.stop)
     if isinstance(error, KeyboardInterrupt):
-        watcher.stop()
+        pass  # 이미 stop + join 완료
     elif isinstance(error, WatcherError):
         log(str(error))
         if isinstance(error, core.WindowNotFoundError):
@@ -233,10 +249,9 @@ def run(args) -> int:
 
 def run_calibrate(args) -> int:
     watcher = SlideWatcher(build_watch_options(args), build_config(args), on_event=print_event)
-    error = _run_in_thread(watcher.run_calibrate, args.calibrate_log)
+    error = _run_in_thread(watcher.run_calibrate, watcher.stop, args.calibrate_log)
     if isinstance(error, KeyboardInterrupt):
-        watcher.stop()
-        log("[calibrate] 사용자에 의해 중단되었습니다.")
+        log("[calibrate] 종료했습니다.")
     elif isinstance(error, WatcherError):
         log(str(error))
         return 1

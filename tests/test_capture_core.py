@@ -212,6 +212,8 @@ def test_watch_loop_saves_initial_and_stable_change_then_stops(core, monkeypatch
     assert captures[1].tag == ""
     assert all(e.path.exists() for e in captures)
     assert any(isinstance(e, core.CandidateEvent) for e in events)
+    resolved = [e for e in events if isinstance(e, core.CandidateResolvedEvent)]
+    assert resolved and resolved[0].captured is True
     stopped = events[-1]
     assert isinstance(stopped, core.StoppedEvent)
     assert stopped.reason == "stopped"
@@ -238,6 +240,8 @@ def test_watch_loop_skips_unstable_change(core, monkeypatch, win32gui_stub, fast
 
     assert saved == 1  # initial만
     assert any("안정화 실패" in e.message for e in events if isinstance(e, core.LogEvent))
+    resolved = [e for e in events if isinstance(e, core.CandidateResolvedEvent)]
+    assert resolved and resolved[0].captured is False
 
 
 def test_manual_capture_request_saves_current_frame(core, monkeypatch, win32gui_stub, fast_options):
@@ -343,3 +347,78 @@ def test_calibrate_emits_metrics_and_writes_csv(core, monkeypatch, win32gui_stub
     assert lines[0].startswith("timestamp,ssim,bbox_ratio")
     assert len(lines) == 3
     assert not list((tmp_path).glob("slide_*.png"))  # calibrate는 저장하지 않는다
+
+
+def test_explicit_hwnd_is_preferred_over_title_search(core, monkeypatch, win32gui_stub, tmp_path):
+    fake = FakeCapture([solid(0)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: pytest.fail("title search should not run"))
+    monkeypatch.setattr(win32gui_stub, "GetWindowText", lambda hwnd: f"Exact {hwnd}")
+
+    options = core.WatchOptions(title="fake", outdir=tmp_path, interval=0.0, hwnd=7)
+    watcher = core.SlideWatcher(options, _fast_config(core))
+    watcher._on_event = lambda e: watcher.stop() if isinstance(e, core.CaptureEvent) else None
+    watcher.run()
+
+    assert watcher.hwnd == 7
+    assert watcher.window_title == "Exact 7"
+
+
+def test_stale_hwnd_falls_back_to_title_search(core, monkeypatch, win32gui_stub, tmp_path):
+    fake = FakeCapture([solid(0)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(3, "Found by title")])
+    monkeypatch.setattr(win32gui_stub, "IsWindow", lambda hwnd: hwnd != 7)
+
+    options = core.WatchOptions(title="fake", outdir=tmp_path, interval=0.0, hwnd=7)
+    watcher = core.SlideWatcher(options, _fast_config(core))
+    watcher._on_event = lambda e: watcher.stop() if isinstance(e, core.CaptureEvent) else None
+    watcher.run()
+
+    assert watcher.hwnd == 3
+    assert watcher.window_title == "Found by title"
+
+
+def test_stop_requested_before_run_is_not_lost(core, monkeypatch, win32gui_stub, fast_options):
+    fake = FakeCapture([solid(0), solid(0), solid(255), solid(255)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(1, "Fake Window")])
+
+    events = []
+    watcher = core.SlideWatcher(fast_options, _fast_config(core), on_event=events.append)
+    watcher.stop()  # 스레드 start 직후, run()이 시작되기 전에 들어온 stop 요청을 흉내낸다
+    saved = watcher.run()
+
+    assert saved == 1  # initial만 저장하고 루프에 들어가자마자 종료
+    assert isinstance(events[-1], core.StoppedEvent)
+    assert events[-1].reason == "stopped"
+
+
+def test_stop_requested_before_calibrate_is_not_lost(core, monkeypatch, win32gui_stub, tmp_path):
+    fake = FakeCapture([solid(0), solid(255)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(1, "Fake Window")])
+
+    options = core.WatchOptions(title="fake", outdir=tmp_path, interval=0.0)
+    events = []
+    watcher = core.SlideWatcher(options, _fast_config(core), on_event=events.append)
+    watcher.stop()
+    frames = watcher.run_calibrate()
+
+    assert frames == 0
+    assert isinstance(events[-1], core.StoppedEvent)
+
+
+def test_reset_allows_rerun(core, monkeypatch, win32gui_stub, fast_options):
+    fake = FakeCapture([solid(0)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(1, "Fake Window")])
+
+    watcher = core.SlideWatcher(fast_options, _fast_config(core))
+    watcher.stop()
+    assert watcher.run() == 1
+    watcher.reset()
+    assert not watcher.stop_event.is_set()
+    assert watcher.save_count == 0
+    watcher._on_event = lambda e: watcher.stop() if isinstance(e, core.CaptureEvent) else None
+    assert watcher.run() == 1
