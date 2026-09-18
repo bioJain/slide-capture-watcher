@@ -60,3 +60,43 @@ def test_main_reports_missing_window(cli, core, monkeypatch, tmp_path, capsys):
     assert code == 1
     assert "찾지 못했습니다" in out
     assert "--list-windows" in out
+
+
+def test_ctrl_c_stops_worker_and_joins_before_returning(cli, monkeypatch):
+    import threading
+
+    stop_event = threading.Event()
+    finished = threading.Event()
+    stop_calls = []
+
+    def target():
+        stop_event.wait(5.0)
+        finished.set()  # stop 이후 정리 작업이 끝났음을 표시
+
+    def stop_fn():
+        stop_calls.append(1)
+        stop_event.set()
+
+    original_join = threading.Thread.join
+    raised = []
+
+    def join_once_interrupted(self, timeout=None):
+        if not raised:
+            raised.append(1)
+            raise KeyboardInterrupt  # 첫 join 대기 중 Ctrl+C 를 흉내낸다
+        return original_join(self, timeout)
+
+    monkeypatch.setattr(threading.Thread, "join", join_once_interrupted)
+    error = cli._run_in_thread(target, stop_fn)
+
+    assert isinstance(error, KeyboardInterrupt)
+    assert stop_calls == [1]
+    assert finished.is_set()  # 워커가 정리를 마친 뒤에야 반환됐다
+
+
+def test_worker_exception_is_returned(cli):
+    def target():
+        raise RuntimeError("boom")
+
+    error = cli._run_in_thread(target, lambda: None)
+    assert isinstance(error, RuntimeError)

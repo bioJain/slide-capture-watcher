@@ -523,6 +523,9 @@ class SlideWatcher:
         threading.Thread(target=watcher.run, daemon=True).start()
         ...
         watcher.stop()
+
+    인스턴스는 한 번의 실행을 전제로 한다. 스레드 start 직후 들어온 stop() 요청이 유실되지 않도록
+    run() 안에서 stop_event를 초기화하지 않으므로, 재실행하려면 start 전에 reset()을 호출한다.
     """
 
     def __init__(
@@ -550,6 +553,16 @@ class SlideWatcher:
     def request_capture(self) -> None:
         """다음 폴링에서 변화 여부와 무관하게 현재 프레임을 저장하도록 요청한다."""
         self.capture_request.set()
+
+    def reset(self) -> None:
+        """
+        같은 인스턴스로 다시 run()/run_calibrate() 하기 전에 호출한다.
+        stop/캡처 요청 플래그와 저장 카운터를 초기화한다. 워커 스레드를 start하기 **전에** 호출할 것.
+        """
+        self.stop_event.clear()
+        self.capture_request.clear()
+        self.save_count = 0
+        self._blank_warned = False
 
     # -- 내부 유틸 ---------------------------------------------------------------
 
@@ -632,7 +645,8 @@ class SlideWatcher:
         """
         cfg = self.config
         opts = self.options
-        self.stop_event.clear()
+        # stop_event는 여기서 clear하지 않는다. 스레드를 start한 직후 run()이 이 줄에 닿기 전에
+        # 들어온 stop() 요청이 지워지는 경쟁을 막기 위한 것. 재사용하려면 reset()을 먼저 호출.
         self._locate_window()
         self._log(f"대상 창: \"{self.window_title}\" (mode={opts.mode})")
 
@@ -743,7 +757,6 @@ class SlideWatcher:
         """
         cfg = self.config
         opts = self.options
-        self.stop_event.clear()
         self._locate_window()
         self._log(f"[calibrate] 대상 창: \"{self.window_title}\" (mode={opts.mode})")
 

@@ -377,3 +377,48 @@ def test_stale_hwnd_falls_back_to_title_search(core, monkeypatch, win32gui_stub,
 
     assert watcher.hwnd == 3
     assert watcher.window_title == "Found by title"
+
+
+def test_stop_requested_before_run_is_not_lost(core, monkeypatch, win32gui_stub, fast_options):
+    fake = FakeCapture([solid(0), solid(0), solid(255), solid(255)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(1, "Fake Window")])
+
+    events = []
+    watcher = core.SlideWatcher(fast_options, _fast_config(core), on_event=events.append)
+    watcher.stop()  # 스레드 start 직후, run()이 시작되기 전에 들어온 stop 요청을 흉내낸다
+    saved = watcher.run()
+
+    assert saved == 1  # initial만 저장하고 루프에 들어가자마자 종료
+    assert isinstance(events[-1], core.StoppedEvent)
+    assert events[-1].reason == "stopped"
+
+
+def test_stop_requested_before_calibrate_is_not_lost(core, monkeypatch, win32gui_stub, tmp_path):
+    fake = FakeCapture([solid(0), solid(255)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(1, "Fake Window")])
+
+    options = core.WatchOptions(title="fake", outdir=tmp_path, interval=0.0)
+    events = []
+    watcher = core.SlideWatcher(options, _fast_config(core), on_event=events.append)
+    watcher.stop()
+    frames = watcher.run_calibrate()
+
+    assert frames == 0
+    assert isinstance(events[-1], core.StoppedEvent)
+
+
+def test_reset_allows_rerun(core, monkeypatch, win32gui_stub, fast_options):
+    fake = FakeCapture([solid(0)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    monkeypatch.setattr(core, "find_windows_by_title", lambda title: [(1, "Fake Window")])
+
+    watcher = core.SlideWatcher(fast_options, _fast_config(core))
+    watcher.stop()
+    assert watcher.run() == 1
+    watcher.reset()
+    assert not watcher.stop_event.is_set()
+    assert watcher.save_count == 0
+    watcher._on_event = lambda e: watcher.stop() if isinstance(e, core.CaptureEvent) else None
+    assert watcher.run() == 1
