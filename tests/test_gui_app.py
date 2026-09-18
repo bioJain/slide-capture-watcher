@@ -153,3 +153,25 @@ def test_add_and_remove_exclude(app, monkeypatch):
     app.list_exclude.selection_set(0)
     app.remove_exclude()
     assert list(app.list_exclude.get(0, "end")) == []
+
+
+def test_duplicate_titles_map_to_distinct_hwnds(app, core, monkeypatch):
+    monkeypatch.setattr(core, "enumerate_visible_windows", lambda: [(7, "Same"), (9, "Same")])
+    app.refresh_windows()
+    assert list(app.combo_window["values"]) == ["Same", "Same [2]"]
+    app.combo_window.current(1)
+    values = app.form_values()
+    assert values.hwnd == 9
+    assert values.window_title == "Same"
+
+
+def test_status_returns_to_watching_after_failed_stabilization(app, core, root, monkeypatch):
+    # 후보 감지 후 계속 바뀌는 프레임 -> 안정화 실패 -> 상태가 "감시 중"으로 돌아와야 한다.
+    frames = [solid(0), solid(255), solid(0), solid(255), solid(0), solid(255), solid(0)]
+    monkeypatch.setattr(core, "capture_window_printwindow", FakeCapture(frames))
+    app.vars["interval"].set("1.0")  # 실패 후 다음 폴링까지 여유를 둬서 상태를 관찰
+    app.start()
+    assert pump(root, lambda: "안정화 실패" in log_text(app)), log_text(app)
+    assert pump(root, lambda: app.var_status.get() == "감시 중", timeout=2.0), app.var_status.get()
+    app.stop()
+    assert pump(root, lambda: not app.is_running)

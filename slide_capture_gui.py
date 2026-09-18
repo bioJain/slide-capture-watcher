@@ -33,6 +33,7 @@ from typing import Dict, List, Optional, Tuple
 import capture_core as core
 from capture_core import (
     CandidateEvent,
+    CandidateResolvedEvent,
     CaptureEvent,
     Config,
     LogEvent,
@@ -173,6 +174,24 @@ def build_settings(values: FormValues, calibrate: bool = False) -> Tuple[WatchOp
     return options, cfg
 
 
+def make_window_labels(windows: List[Tuple[int, str]]) -> Dict[str, Tuple[int, str]]:
+    """
+    드롭다운에 표시할 고유 문자열 → (hwnd, title) 매핑을 만든다.
+    같은 제목의 창이 여러 개면 두 번째부터 " [2]", " [3]" 을 붙여 구분한다(순서 유지).
+    """
+    labels: Dict[str, Tuple[int, str]] = {}
+    seen: Dict[str, int] = {}
+    for hwnd, title in windows:
+        count = seen.get(title, 0) + 1
+        seen[title] = count
+        label = title if count == 1 else f"{title} [{count}]"
+        while label in labels:  # 제목 자체가 " [2]"로 끝나는 창과 충돌하는 경우
+            count += 1
+            label = f"{title} [{count}]"
+        labels[label] = (hwnd, title)
+    return labels
+
+
 # ---------------------------------------------------------------------------
 # 이벤트 → 로그 문자열 (Tk와 무관)
 # ---------------------------------------------------------------------------
@@ -199,7 +218,7 @@ def format_event(event: core.Event) -> Optional[str]:
         if event.reason == "error":
             return None
         return f"감시 종료. 총 {event.save_count}개 저장됨."
-    if isinstance(event, CandidateEvent):
+    if isinstance(event, (CandidateEvent, CandidateResolvedEvent)):
         return None
     return str(event)
 
@@ -222,6 +241,7 @@ class WatcherApp:
         self.watcher: Optional[SlideWatcher] = None
         self.thread: Optional[threading.Thread] = None
         self._windows: List[Tuple[int, str]] = []
+        self._window_by_label: Dict[str, Tuple[int, str]] = {}
         self._log_lines = 0
 
         root.title(APP_TITLE)
@@ -350,11 +370,10 @@ class WatcherApp:
     # -- 폼 접근 -----------------------------------------------------------------
 
     def form_values(self) -> FormValues:
-        index = self.combo_window.current()
-        hwnd: Optional[int] = None
-        title = self.var_window.get()
-        if 0 <= index < len(self._windows):
-            hwnd, title = self._windows[index]
+        # 드롭다운 표시 문자열은 창마다 고유하므로(중복 제목은 " [n]" 접미사) 문자열로 hwnd를 찾는다.
+        # combobox.current()는 같은 문자열의 첫 항목을 돌려주기 때문에 쓰지 않는다.
+        label = self.var_window.get()
+        hwnd, title = self._window_by_label.get(label, (None, label))
         return FormValues(
             window_title=title,
             hwnd=hwnd,
@@ -387,16 +406,17 @@ class WatcherApp:
             windows = []
         # 이 앱 자신의 창은 목록에서 뺀다.
         self._windows = [(hwnd, title) for hwnd, title in windows if title != APP_TITLE]
-        titles = [title for _, title in self._windows]
-        self.combo_window["values"] = titles
+        self._window_by_label = make_window_labels(self._windows)
+        labels = list(self._window_by_label)
+        self.combo_window["values"] = labels
         current = self.var_window.get()
-        if current in titles:
-            self.combo_window.current(titles.index(current))
-        elif titles:
+        if current in labels:
+            self.combo_window.current(labels.index(current))
+        elif labels:
             self.combo_window.current(0)
         else:
             self.var_window.set("")
-        self.log(f"창 목록 새로고침: {len(titles)}개")
+        self.log(f"창 목록 새로고침: {len(labels)}개")
 
     def choose_outdir(self) -> None:
         from tkinter import filedialog
@@ -484,6 +504,9 @@ class WatcherApp:
             self.var_status.set("감시 중")
         elif isinstance(event, CandidateEvent):
             self.var_status.set("안정화 대기...")
+        elif isinstance(event, CandidateResolvedEvent):
+            # 안정화 실패로 건너뛴 경우에도 감시는 계속되므로 상태를 되돌린다.
+            self.var_status.set("감시 중")
         elif isinstance(event, StoppedEvent):
             self._set_running(False, False)
             self.var_status.set("대기 중" if event.reason == "stopped" else "종료됨")

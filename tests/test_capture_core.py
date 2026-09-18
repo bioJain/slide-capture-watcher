@@ -212,6 +212,8 @@ def test_watch_loop_saves_initial_and_stable_change_then_stops(core, monkeypatch
     assert captures[1].tag == ""
     assert all(e.path.exists() for e in captures)
     assert any(isinstance(e, core.CandidateEvent) for e in events)
+    resolved = [e for e in events if isinstance(e, core.CandidateResolvedEvent)]
+    assert resolved and resolved[0].captured is True
     stopped = events[-1]
     assert isinstance(stopped, core.StoppedEvent)
     assert stopped.reason == "stopped"
@@ -238,6 +240,8 @@ def test_watch_loop_skips_unstable_change(core, monkeypatch, win32gui_stub, fast
 
     assert saved == 1  # initial만
     assert any("안정화 실패" in e.message for e in events if isinstance(e, core.LogEvent))
+    resolved = [e for e in events if isinstance(e, core.CandidateResolvedEvent)]
+    assert resolved and resolved[0].captured is False
 
 
 def test_manual_capture_request_saves_current_frame(core, monkeypatch, win32gui_stub, fast_options):

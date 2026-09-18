@@ -92,3 +92,17 @@ def test_format_event_lines(gui, core, tmp_path):
     assert gui.format_event(core.StoppedEvent("error", 0)) is None
     assert "총 2개" in gui.format_event(core.StoppedEvent("stopped", 2))
     assert "잃어버려" in gui.format_event(core.StoppedEvent("window_lost", 0))
+
+
+def test_make_window_labels_disambiguates_duplicate_titles(gui):
+    windows = [(1, "Zoom"), (2, "Zoom"), (3, "Chrome"), (4, "Zoom"), (5, "Zoom [2]")]
+    labels = gui.make_window_labels(windows)
+    assert list(labels) == ["Zoom", "Zoom [2]", "Chrome", "Zoom [3]", "Zoom [2] [2]"]
+    assert labels["Zoom [2]"] == (2, "Zoom")
+    assert labels["Zoom [3]"] == (4, "Zoom")
+    assert labels["Zoom [2] [2]"] == (5, "Zoom [2]")
+
+
+def test_format_event_ignores_candidate_resolved(gui, core):
+    assert gui.format_event(core.CandidateResolvedEvent(True)) is None
+    assert gui.format_event(core.CandidateResolvedEvent(False)) is None

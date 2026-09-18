@@ -6,8 +6,8 @@ capture_core.py
 
 CLI(``slide_capture_watcher.py``)와 GUI가 공통으로 import해서 쓰는 부분을 모아 두었습니다.
 이 모듈은 콘솔 출력이나 ``sys.exit`` 을 직접 하지 않습니다. 진행 상황은 이벤트 객체
-(:class:`LogEvent`, :class:`CaptureEvent`, :class:`CandidateEvent`, :class:`MetricsEvent`,
-:class:`StoppedEvent`)를 콜백으로 전달하고, 치명적인 오류는 :class:`WatcherError` 계열
+(:class:`LogEvent`, :class:`CaptureEvent`, :class:`CandidateEvent`,
+:class:`CandidateResolvedEvent`, :class:`MetricsEvent`, :class:`StoppedEvent`)를 콜백으로 전달하고, 치명적인 오류는 :class:`WatcherError` 계열
 예외로 올립니다.
 
 스레드 모델
@@ -480,6 +480,13 @@ class CandidateEvent:
 
 
 @dataclass
+class CandidateResolvedEvent:
+    """후보 변화의 안정화 판정이 끝남. ``captured`` 가 False면 안정화 실패로 건너뛴 것."""
+
+    captured: bool
+
+
+@dataclass
 class MetricsEvent:
     """캘리브레이션 모드의 프레임별 지표."""
 
@@ -494,7 +501,7 @@ class StoppedEvent:
     outdir: Optional[Path] = None
 
 
-Event = Union[LogEvent, CaptureEvent, CandidateEvent, MetricsEvent, StoppedEvent]
+Event = Union[LogEvent, CaptureEvent, CandidateEvent, CandidateResolvedEvent, MetricsEvent, StoppedEvent]
 EventCallback = Callable[[Event], None]
 
 
@@ -721,6 +728,7 @@ class SlideWatcher:
                     "(동영상 재생 등으로 계속 변하는 중일 가능성).",
                     "warning",
                 )
+            self._emit(CandidateResolvedEvent(stabilized))
             baseline_img, baseline_gray = check_img, check_gray
 
         self._emit(StoppedEvent(reason, self.save_count, opts.outdir))
