@@ -175,3 +175,27 @@ def test_status_returns_to_watching_after_failed_stabilization(app, core, root, 
     assert pump(root, lambda: app.var_status.get() == "감시 중", timeout=2.0), app.var_status.get()
     app.stop()
     assert pump(root, lambda: not app.is_running)
+
+
+def test_captures_appear_in_gallery(app, core, root, monkeypatch, tmp_path):
+    fake = FakeCapture([solid(0), solid(0), solid(255), solid(255), solid(255)])
+    monkeypatch.setattr(core, "capture_window_printwindow", fake)
+    app.start()
+    assert pump(root, lambda: len(app.gallery.paths()) >= 2), log_text(app)
+    assert [p.suffix for p in app.gallery.paths()] == [".png", ".png"]
+    assert len(app.gallery.selected_paths()) == 2
+    app.stop()
+    assert pump(root, lambda: not app.is_running)
+
+
+def test_existing_images_are_loaded_on_start(app, core, root, monkeypatch, tmp_path):
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    solid(90).save(outdir / "slide_20260101_000001.png")
+    monkeypatch.setattr(core, "capture_window_printwindow", FakeCapture([solid(0)]))
+    app.start()
+    assert pump(root, lambda: "저장됨 (1)" in log_text(app))
+    assert "기존 이미지 1개" in log_text(app)
+    assert len(app.gallery.paths()) == 2
+    app.stop()
+    assert pump(root, lambda: not app.is_running)
