@@ -18,7 +18,9 @@ SSIM 계산은 OpenCV만으로 구현되어 있어 `scikit-image`는 더 이상 
 | 파일 | 역할 |
 | --- | --- |
 | `capture_core.py` | 창 탐색, 캡처, 변화 감지, 감시 루프. GUI와 CLI가 공통으로 import하는 core 모듈 |
-| `slide_capture_gui.py` | Tkinter GUI. 창 선택, 저장 폴더, 감지 설정 패널, Start/Stop/지금 캡처, 캘리브레이션, 로그 |
+| `slide_capture_gui.py` | Tkinter GUI. 창 선택, 저장 폴더, 감지 설정 패널, Start/Stop/지금 캡처, 캘리브레이션, 로그, 썸네일 갤러리 |
+| `gallery.py` | 썸네일 갤러리 위젯. 체크박스 다중 선택, 클릭 시 큰 미리보기와 코멘트 입력 |
+| `image_files.py` | 캡처 폴더 이미지 검색과 파일명 숫자 정렬 (갤러리와 내보내기가 공용) |
 | `slide_capture_watcher.py` | 명령행 wrapper. 인자를 `Config`/`WatchOptions`로 바꾸고 core 이벤트를 콘솔에 출력 |
 | `tests/` | core, CLI, GUI 단위 테스트 (`python -m pytest tests`; GUI 위젯 테스트는 디스플레이가 있을 때만 실행) |
 | `tools/png_to_pdf/` | 독립 PNG→PDF 변환 도구 |
@@ -39,7 +41,9 @@ python slide_capture_gui.py
 
 창을 고르고 저장 폴더를 지정한 뒤 Start를 누르면 됩니다. 감지 설정 패널에서 ROI, 제외 영역,
 그리드, 임계치를 바꿀 수 있고, "캘리브레이션"을 켜고 Start하면 저장 없이 지표만 로그에
-출력됩니다. "지금 캡처"는 변화 여부와 관계없이 현재 프레임을 저장합니다.
+출력됩니다. "지금 캡처"는 변화 여부와 관계없이 현재 프레임을 저장합니다. 오른쪽 갤러리에는
+저장 폴더의 기존 이미지와 새로 저장된 캡처가 파일명 순서로 쌓이고, 썸네일을 클릭하면 큰
+미리보기와 코멘트 입력창이 열립니다. 체크박스는 나중에 내보낼 이미지를 고르는 용도입니다.
 
 CLI로 사용하려면:
 

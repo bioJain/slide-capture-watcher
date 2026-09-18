@@ -8,6 +8,8 @@ Slide Capture Watcher의 Tkinter + ttk GUI 골격 (JHA-7).
 - 감지 설정 패널(ROI, 제외 영역, 그리드, 임계치, 디바운스, 폴링 간격)
 - 캘리브레이션 모드(저장 없이 지표만 로그에 출력)
 - 상태 로그 영역
+- 썸네일 갤러리(``gallery.ThumbnailGallery``): 캡처가 저장될 때마다 증분 추가, 체크박스 다중 선택,
+  클릭 시 큰 미리보기 + 코멘트 입력(영속화는 JHA-10)
 
 스레드 모델
 -----------
@@ -31,6 +33,7 @@ from typing import Dict, List, Optional, Tuple
 
 # capture_core 를 먼저 import해야 프로세스가 DPI-aware로 선언됩니다 (다른 win32 호출보다 먼저).
 import capture_core as core
+from gallery import ThumbnailGallery
 from capture_core import (
     CandidateEvent,
     CandidateResolvedEvent,
@@ -245,7 +248,8 @@ class WatcherApp:
         self._log_lines = 0
 
         root.title(APP_TITLE)
-        root.minsize(720, 560)
+        root.minsize(1100, 600)
+        root.geometry("1260x680")
 
         defaults = FormValues.from_config(Config())
         self.var_window = tk.StringVar()
@@ -277,9 +281,20 @@ class WatcherApp:
 
     def _build_widgets(self) -> None:
         tk, ttk = self.tk, self.ttk
-        root = self.root
+        # 왼쪽: 설정/제어/로그, 오른쪽: 썸네일 갤러리
+        self.root.columnconfigure(0, weight=0)
+        self.root.columnconfigure(1, weight=1, minsize=420)
+        self.root.rowconfigure(0, weight=1)
+        root = ttk.Frame(self.root)
+        root.grid(row=0, column=0, sticky="nsew")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(3, weight=1)
+        gallery_holder = ttk.Frame(self.root, padding=(0, 10, 10, 10))
+        gallery_holder.grid(row=0, column=1, sticky="nsew")
+        gallery_holder.rowconfigure(0, weight=1)
+        gallery_holder.columnconfigure(0, weight=1)
+        self.gallery = ThumbnailGallery(gallery_holder)
+        self.gallery.grid_into(row=0, column=0, sticky="nsew")
 
         # 1) 감시 대상 / 저장 폴더
         target = ttk.LabelFrame(root, text="감시 대상", padding=8)
@@ -467,6 +482,18 @@ class WatcherApp:
                 self.queue.put(LogEvent(f"예상치 못한 오류: {exc!r}", "error"))
                 self.queue.put(StoppedEvent("error", watcher.save_count, options.outdir))
 
+        if not calibrate:
+            # 저장 폴더에 이미 있는 캡처(이전 세션 등)를 갤러리에 먼저 보여준다.
+            # 폴더 목록을 읽을 수 없으면(ACL 등) 워커를 시작하지 않고 오류로 알린다.
+            try:
+                existing = self.gallery.load_folder(options.outdir)
+            except OSError as exc:
+                self.watcher = None
+                self._show_error("저장 폴더", f"폴더를 읽을 수 없습니다: {options.outdir}\n{exc}")
+                return
+            if existing:
+                self.log(f"저장 폴더의 기존 이미지 {existing}개를 갤러리에 불러왔습니다.")
+
         self.thread = threading.Thread(target=_worker, name="slide-watcher", daemon=True)
         self.thread.start()
         self._set_running(True, calibrate)
@@ -502,6 +529,7 @@ class WatcherApp:
         if isinstance(event, CaptureEvent):
             self.var_count.set(f"저장 {event.count}개")
             self.var_status.set("감시 중")
+            self.gallery.add_image(event.path)
         elif isinstance(event, CandidateEvent):
             self.var_status.set("안정화 대기...")
         elif isinstance(event, CandidateResolvedEvent):
