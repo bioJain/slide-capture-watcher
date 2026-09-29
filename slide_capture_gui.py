@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Tuple
 # capture_core 를 먼저 import해야 프로세스가 DPI-aware로 선언됩니다 (다른 win32 호출보다 먼저).
 import capture_core as core
 from gallery import ThumbnailGallery
+from session_store import load_notes, save_notes, session_directory
 from capture_core import (
     CandidateEvent,
     CandidateResolvedEvent,
@@ -246,6 +247,7 @@ class WatcherApp:
         self._windows: List[Tuple[int, str]] = []
         self._window_by_label: Dict[str, Tuple[int, str]] = {}
         self._log_lines = 0
+        self._session_dir: Optional[Path] = None
 
         root.title(APP_TITLE)
         root.minsize(1100, 600)
@@ -254,6 +256,7 @@ class WatcherApp:
         defaults = FormValues.from_config(Config())
         self.var_window = tk.StringVar()
         self.var_outdir = tk.StringVar(value=str(Path("captures").resolve()))
+        self.var_session_name = tk.StringVar(value="")
         self.var_mode = tk.StringVar(value="window")
         self.var_debug_diff = tk.BooleanVar(value=False)
         self.var_calibrate = tk.BooleanVar(value=False)
@@ -293,7 +296,7 @@ class WatcherApp:
         gallery_holder.grid(row=0, column=1, sticky="nsew")
         gallery_holder.rowconfigure(0, weight=1)
         gallery_holder.columnconfigure(0, weight=1)
-        self.gallery = ThumbnailGallery(gallery_holder)
+        self.gallery = ThumbnailGallery(gallery_holder, on_comment_change=self._save_comment)
         self.gallery.grid_into(row=0, column=0, sticky="nsew")
 
         # 1) 감시 대상 / 저장 폴더
@@ -313,8 +316,14 @@ class WatcherApp:
         self.btn_browse = ttk.Button(target, text="찾아보기...", command=self.choose_outdir)
         self.btn_browse.grid(row=1, column=2, pady=(6, 0))
 
+        ttk.Label(target, text="세션 이름").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.entry_session_name = ttk.Entry(target, textvariable=self.var_session_name)
+        self.entry_session_name.grid(row=2, column=1, sticky="ew", padx=6, pady=(6, 0))
+        self.btn_open_session = ttk.Button(target, text="이전 세션 열기...", command=self.open_session)
+        self.btn_open_session.grid(row=2, column=2, pady=(6, 0))
+
         mode_row = ttk.Frame(target)
-        mode_row.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        mode_row.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ttk.Label(mode_row, text="캡처 모드").pack(side="left")
         self.radio_window = ttk.Radiobutton(mode_row, text="window (PrintWindow)", value="window", variable=self.var_mode)
         self.radio_window.pack(side="left", padx=(6, 0))
@@ -440,6 +449,38 @@ class WatcherApp:
         if chosen:
             self.var_outdir.set(chosen)
 
+    def open_session(self) -> None:
+        """Open an existing capture folder and restore its saved comments."""
+        from tkinter import filedialog
+
+        chosen = filedialog.askdirectory(title="이전 세션 열기", initialdir=self.var_outdir.get() or None)
+        if chosen:
+            self._load_session(Path(chosen))
+
+    def _load_session(self, directory: Path) -> bool:
+        try:
+            count = self.gallery.load_folder(directory)
+            notes = load_notes(directory)
+        except (OSError, ValueError) as exc:
+            self._show_error("세션 불러오기", str(exc))
+            return False
+        paths_by_name = {path.name: path for path in self.gallery.paths()}
+        for filename, comment in notes.items():
+            path = paths_by_name.get(filename)
+            if path is not None:
+                self.gallery.set_comment(path, comment)
+        self._session_dir = directory
+        self.log(f"이전 세션을 열었습니다: {directory} (이미지 {count}개, 코멘트 {len(notes)}개)")
+        return True
+
+    def _save_comment(self, path: Path, text: str) -> None:
+        directory = self._session_dir or path.parent
+        notes = {item.name: comment for item, comment in self.gallery.comments.items() if comment}
+        try:
+            save_notes(directory, notes)
+        except OSError as exc:
+            self.log(f"[오류] 코멘트를 저장하지 못했습니다: {exc}")
+
     def add_exclude(self) -> None:
         text = self.vars["exclude_entry"].get().strip()
         if not text:
@@ -466,6 +507,10 @@ class WatcherApp:
             self._show_error("입력 확인", str(exc))
             return
 
+        if not calibrate:
+            options.outdir = session_directory(options.outdir, self.var_session_name.get())
+            self._session_dir = options.outdir
+
         self.watcher = SlideWatcher(options, cfg, on_event=self.queue.put)
         watcher = self.watcher
 
@@ -487,7 +532,12 @@ class WatcherApp:
             # 폴더 목록을 읽을 수 없으면(ACL 등) 워커를 시작하지 않고 오류로 알린다.
             try:
                 existing = self.gallery.load_folder(options.outdir)
-            except OSError as exc:
+                notes = load_notes(options.outdir)
+                paths_by_name = {path.name: path for path in self.gallery.paths()}
+                for filename, comment in notes.items():
+                    if filename in paths_by_name:
+                        self.gallery.set_comment(paths_by_name[filename], comment)
+            except (OSError, ValueError) as exc:
                 self.watcher = None
                 self._show_error("저장 폴더", f"폴더를 읽을 수 없습니다: {options.outdir}\n{exc}")
                 return
@@ -546,6 +596,8 @@ class WatcherApp:
         state_run = "disabled" if running else "normal"
         self.btn_start.configure(state=state_run)
         self.btn_refresh.configure(state=state_run)
+        self.btn_open_session.configure(state=state_run)
+        self.entry_session_name.configure(state=state_run)
         self.combo_window.configure(state="disabled" if running else "readonly")
         self.btn_stop.configure(state="normal" if running else "disabled")
         self.btn_capture.configure(state="normal" if running and not calibrate else "disabled")
