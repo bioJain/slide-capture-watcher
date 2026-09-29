@@ -10,7 +10,6 @@ gallery.py
   하나만 띄운다(장시간 세션에서 원본을 붙들지 않기 위함).
 - ``add_image(path)`` 로 캡처 스레드가 알려준 새 파일을 증분 추가한다(전체 다시 그리지 않음).
 - 코멘트 입력창은 상세 패널에 있으며 ``on_comment_change(path, text)`` 콜백으로 밖에 알린다.
-  파일로 영속화하는 것은 JHA-10에서 처리한다. 이 위젯은 세션 동안 메모리에만 들고 있는다.
 
 Tk 위젯은 메인 스레드에서만 다뤄야 한다. 캡처 스레드는 큐로 이벤트를 보내고 메인 스레드가
 ``add_image`` 를 호출하는 구조를 전제로 한다(``slide_capture_gui.WatcherApp`` 참고).
@@ -190,6 +189,7 @@ class ThumbnailGallery:
             item.frame.destroy()
         self._items.clear()
         self._order.clear()
+        self.comments.clear()
         self._current = None
         self._show_detail(None)
         self._update_summary()
